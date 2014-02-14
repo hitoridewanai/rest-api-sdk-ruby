@@ -169,7 +169,7 @@ module PayPal::SDK
       class Sale < Base
         include RequestDataType
 
-        attr_accessor :id, :create_time, :update_time, :amount, :state, :parent_payment, :links
+        attr_accessor :id, :create_time, :update_time, :amount, :state, :pending_reason, :parent_payment, :links
 
         def self.find(id)
           path = "v1/payments/sale/#{id}"
