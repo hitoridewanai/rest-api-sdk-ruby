@@ -17,24 +17,23 @@ module PayPal
             @api
           end
         end
+
         alias_method :config=, :set_config
         alias_method :set_api, :set_config
         alias_method :api=, :set_config
 
-        # Override token
         def token=(token)
-          set_config( :client_id => nil, :client_secret => nil ).token = token
+          set_config(client_id: nil, client_secret: nil).token = token
         end
-        alias_method :"auth=", :"token="
 
-        # Override client id
+        alias_method :'auth=', :'token='
+
         def client_id=(client_id)
-          set_config(:client_id => client_id).token = nil
+          set_config(client_id: client_id).token = nil
         end
 
-        # Override client secret
         def client_secret=(client_secret)
-          set_config(:client_secret => client_secret).token = nil
+          set_config(client_secret: client_secret).token = nil
         end
       end
     end

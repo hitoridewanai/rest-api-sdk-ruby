@@ -1,459 +1,477 @@
-require 'paypal-sdk-core'
-require 'uuidtools'
-
 module PayPal::SDK
   module REST
     module DataTypes
       class Base < Core::API::DataTypes::Base
-        attr_accessor :error
-        attr_writer   :header, :request_id
+        attr_accessor :request_id, :headers, :error
 
-        def header
-          @header ||= {}
+        def initialize(hash = {})
+          populate hash
         end
 
         def request_id
           @request_id ||= UUIDTools::UUID.random_create.to_s
         end
 
-        def http_header
-          { "PayPal-Request-Id" => request_id.to_s }.merge(header)
+        def headers
+          @headers ||= {}
         end
 
         def success?
-          @error.nil?
+          self.error.nil?
         end
 
-        def merge!(values)
-          @error = nil
-          super
+        protected
+        def populate(hash)
+          hash.each { |name, value| send "#{name}=", value }
         end
 
-        def self.load_members
+        def request_headers
+          self.headers.merge! 'PayPal-Request-Id' => request_id.to_s
+        end
+
+        def strip_hash(hash)
+          hash.delete_if { |k, v| v == nil or v == {} or v == [] }
         end
       end
 
       class Payment < Base
-
-        def self.load_members
-          object_of :id, String
-          object_of :create_time, DateTime
-          object_of :update_time, DateTime
-          object_of :intent, String
-          object_of :payer, Payer
-          array_of  :transactions, Transaction
-          object_of :state, String
-          object_of :redirect_urls, RedirectUrls
-          array_of  :links, Links
-        end
-
         include RequestDataType
 
-        def create()
-          path = "v1/payments/payment"
-          response = api.post(path, self.to_hash, http_header)
-          self.merge!(response)
-          success?
+        attr_accessor :id, :intent, :state, :payer, :transactions, :redirect_urls, :links, :token, :create_time,
+                      :update_time
+
+        def self.find(id)
+          path = "v1/payments/payment/#{id}"
+          response = api.get path
+          self.new response
         end
 
-        class << self
-          def find(resource_id)
-            raise ArgumentError.new("id required") if resource_id.to_s.strip.empty?
-            path = "v1/payments/payment/#{resource_id}"
-            self.new(api.get(path))
-          end
+        def self.all(options = {})
+          path = 'v1/payments/payment'
+          response = api.get path, options
+          PaymentHistory.new response
+        end
+
+        def create
+          path = 'v1/payments/payment'
+          response = api.post path, self.to_hash, request_headers
+          populate response
+          success?
         end
 
         def execute(payment_execution)
           payment_execution = PaymentExecution.new(payment_execution) unless payment_execution.is_a? PaymentExecution
           path = "v1/payments/payment/#{self.id}/execute"
-          response = api.post(path, payment_execution.to_hash, http_header)
-          self.merge!(response)
+          response = api.post path, payment_execution.to_hash, request_headers
+          populate response
           success?
         end
 
-        class << self
-          def all(options = {})
-            path = "v1/payments/payment"
-            PaymentHistory.new(api.get(path, options))
-          end
+        def link_for(rel)
+          result = @links.select { |o| o.rel == rel }
+          result.empty? ? nil : result[0]
         end
 
-      end
-      class Payer < Base
-
-        def self.load_members
-          object_of :payment_method, String
-          array_of  :funding_instruments, FundingInstrument
-          object_of :payer_info, PayerInfo
+        def payer
+          @payer ||= Payer.new
         end
 
-      end
-      class FundingInstrument < Base
-
-        def self.load_members
-          object_of :credit_card, CreditCard
-          object_of :credit_card_token, CreditCardToken
+        def transactions
+          @transactions ||= []
         end
 
+        def redirect_urls
+          @redirect_urls ||= RedirectUrls.new
+        end
+
+        def links
+          @links ||= []
+        end
+
+        def token
+          @token ||= parse_token
+        end
+
+        def create_time
+          @create_time ||= Time.now.iso8601
+        end
+
+        def update_time
+          @create_time ||= Time.now.iso8601
+        end
+
+        def payer=(value)
+          @payer = value.is_a?(Payer) ? value : Payer.new(value)
+        end
+
+        def transactions=(value)
+          @transactions = value.collect { |o| o.is_a?(Transaction) ? o : Transaction.new(o) }
+        end
+
+        def redirect_urls=(value)
+          @redirect_urls = value.is_a?(RedirectUrls) ? value : RedirectUrls.new(value)
+        end
+
+        def links=(value)
+          @links = value.collect { |o| o.is_a?(Link) ? o : Link.new(o) }
+        end
+
+        def to_hash
+          strip_hash id: self.id, intent: self.intent, state: self.state, payer: self.payer.to_hash,
+                     transactions: self.transactions.collect { |o| o.to_hash },
+                     redirect_urls: self.redirect_urls.to_hash, links: self.links.collect { |o| o.to_hash },
+                     create_time: self.create_time, update_time: self.update_time
+        end
+
+        private
+        def parse_token
+          return nil if links.empty?
+          approval_url = link_for('approval_url')
+          return nil if approval_url.nil?
+          /\S+token=([\w-]+)/.match(approval_url.href)[1]
+        end
       end
+
       class CreditCard < Base
-
-        def self.load_members
-          object_of :id, String
-          object_of :number, String
-          object_of :type, String
-          object_of :expire_month, Integer
-          object_of :expire_year, Integer
-          object_of :cvv2, String
-          object_of :first_name, String
-          object_of :last_name, String
-          object_of :billing_address, Address
-          object_of :payer_id, String
-          object_of :state, String
-          object_of :valid_until, String
-          array_of  :links, Links
-        end
-
         include RequestDataType
 
-        def create()
-          path = "v1/vault/credit-card"
-          response = api.post(path, self.to_hash, http_header)
-          self.merge!(response)
+        attr_accessor :id, :number, :type, :expire_month, :expire_year, :cvv2, :first_name, :last_name,
+                      :billing_address, :payer_id, :state, :valid_until, :links
+
+        def self.find(id)
+          path = "v1/vault/credit-card/#{id}"
+          response = api.get path
+          self.new response
+        end
+
+        def create
+          path = 'v1/vault/credit-card'
+          response = api.post path, self.to_hash, request_headers
+          populate response
           success?
         end
 
-        class << self
-          def find(resource_id)
-            raise ArgumentError.new("id required") if resource_id.to_s.strip.empty?
-            path = "v1/vault/credit-card/#{resource_id}"
-            self.new(api.get(path))
-          end
-        end
-
-        def delete()
+        def delete
           path = "v1/vault/credit-card/#{self.id}"
-          response = api.delete(path, {})
-          self.merge!(response)
+          response = api.delete path, {}
+          populate response
           success?
         end
 
-      end
-      class Address < Base
-
-        def self.load_members
-          object_of :line1, String
-          object_of :line2, String
-          object_of :city, String
-          object_of :country_code, String
-          object_of :postal_code, String
-          object_of :state, String
-          object_of :phone, String
+        def to_hash
+          strip_hash id: self.id, number: self.number, type: self.type, expire_month: self.expire_month,
+                     expire_year: self.expire_year, cvv2: self.cvv2, first_name: self.first_name,
+                     last_name: self.last_name, billing_address: self.billing_address, payer_id: self.payer_id,
+                     state: self.state, valid_until: self.valid_until, links: self.links
         end
-
       end
-      class Links < Base
 
-        def self.load_members
-          object_of :href, String
-          object_of :rel, String
-          object_of :targetSchema, HyperSchema
-          object_of :method, String
-          object_of :enctype, String
-          object_of :schema, HyperSchema
-        end
-
-      end
-      class HyperSchema < Base
-
-        def self.load_members
-          array_of  :links, Links
-          object_of :fragmentResolution, String
-          object_of :readonly, Boolean
-          object_of :contentEncoding, String
-          object_of :pathStart, String
-          object_of :mediaType, String
-        end
-
-      end
-      class CreditCardToken < Base
-
-        def self.load_members
-          object_of :credit_card_id, String
-          object_of :payer_id, String
-          object_of :last4, String
-          object_of :type, String
-          object_of :expire_month, Integer
-          object_of :expire_year, Integer
-        end
-
-      end
-      class PayerInfo < Base
-
-        def self.load_members
-          object_of :email, String
-          object_of :first_name, String
-          object_of :last_name, String
-          object_of :payer_id, String
-          object_of :phone, String
-          object_of :shipping_address, Address
-        end
-
-      end
-      class Transaction < Base
-
-        def self.load_members
-          object_of :amount, Amount
-          object_of :payee, Payee
-          object_of :description, String
-          object_of :item_list, ItemList
-          array_of  :related_resources, RelatedResources
-          array_of  :transactions, Transaction
-        end
-
-      end
-      class Amount < Base
-
-        def self.load_members
-          object_of :currency, String
-          object_of :total, String
-          object_of :details, Details
-        end
-
-      end
-      class Details < Base
-
-        def self.load_members
-          object_of :shipping, String
-          object_of :subtotal, String
-          object_of :tax, String
-          object_of :fee, String
-        end
-
-      end
-      class Payee < Base
-
-        def self.load_members
-          object_of :email, String
-          object_of :merchant_id, String
-          object_of :phone, String
-        end
-
-      end
-      class Item < Base
-
-        def self.load_members
-          object_of :quantity, String
-          object_of :name, String
-          object_of :price, String
-          object_of :currency, String
-          object_of :sku, String
-        end
-
-      end
-      class ShippingAddress < Address
-
-        def self.load_members
-          object_of :recipient_name, String
-        end
-
-      end
-      class ItemList < Base
-
-        def self.load_members
-          array_of  :items, Item
-          object_of :shipping_address, ShippingAddress
-        end
-
-      end
-      class RelatedResources < Base
-
-        def self.load_members
-          object_of :sale, Sale
-          object_of :authorization, Authorization
-          object_of :capture, Capture
-          object_of :refund, Refund
-        end
-
-      end
       class Sale < Base
-
-        def self.load_members
-          object_of :id, String
-          object_of :create_time, DateTime
-          object_of :update_time, DateTime
-          object_of :amount, Amount
-          object_of :state, String
-          object_of :parent_payment, String
-          array_of  :links, Links
-        end
-
         include RequestDataType
 
-        class << self
-          def find(resource_id)
-            raise ArgumentError.new("id required") if resource_id.to_s.strip.empty?
-            path = "v1/payments/sale/#{resource_id}"
-            self.new(api.get(path))
-          end
+        attr_accessor :id, :create_time, :update_time, :amount, :state, :parent_payment, :links
+
+        def self.find(id)
+          path = "v1/payments/sale/#{id}"
+          response = api.get path
+          self.new response
         end
 
         def refund(refund)
           refund = Refund.new(refund) unless refund.is_a? Refund
           path = "v1/payments/sale/#{self.id}/refund"
-          response = api.post(path, refund.to_hash, http_header)
-          Refund.new(response)
+          response = api.post path, refund.to_hash, request_headers
+          Refund.new response
         end
 
+        def to_hash
+          strip_hash id: self.id, create_time: self.create_time, update_time: self.update_time, amount: self.amount,
+                     state: self.state, parent_payment: self.parent_payment, link: self.links
+        end
       end
+
       class Authorization < Base
-
-        def self.load_members
-          object_of :id, String
-          object_of :create_time, DateTime
-          object_of :update_time, DateTime
-          object_of :amount, Amount
-          object_of :state, String
-          object_of :parent_payment, String
-          object_of :valid_until, String
-          array_of  :links, Links
-        end
-
         include RequestDataType
 
-        class << self
-          def find(resource_id)
-            raise ArgumentError.new("id required") if resource_id.to_s.strip.empty?
-            path = "v1/payments/authorization/#{resource_id}"
-            self.new(api.get(path))
-          end
+        attr_accessor :id, :create_time, :update_time, :amount, :state, :parent_payment, :valid_until, :links
+
+        def self.find(id)
+          path = "v1/payments/authorization/#{id}"
+          response = api.get path
+          self.new response
         end
 
         def capture(capture)
           capture = Capture.new(capture) unless capture.is_a? Capture
           path = "v1/payments/authorization/#{self.id}/capture"
-          response = api.post(path, capture.to_hash, http_header)
-          Capture.new(response)
+          response = api.post path, capture.to_hash, request_headers
+          Capture.new response
         end
 
-        def void()
+        def void
           path = "v1/payments/authorization/#{self.id}/void"
-          response = api.post(path, {}, http_header)
-          self.merge!(response)
+          response = api.post path, {}, request_headers
+          populate response
           success?
         end
 
-        def reauthorize()
+        def reauthorize
           path = "v1/payments/authorization/#{self.id}/reauthorize"
-          response = api.post(path, self.to_hash, http_header)
-          self.merge!(response)
+          response = api.post path, self.to_hash, request_headers
+          populate response
           success?
         end
 
-      end
-      class Capture < Base
-
-        def self.load_members
-          object_of :id, String
-          object_of :create_time, DateTime
-          object_of :update_time, DateTime
-          object_of :amount, Amount
-          object_of :is_final_capture, Boolean
-          object_of :state, String
-          object_of :parent_payment, String
-          array_of  :links, Links
+        def to_hash
+          strip_hash id: self.id, create_time: self.create_time, update_time: self.update_time, amount: self.amount,
+                     state: self.state, parent_payment: self.parent_payment, valid_until: self.valid_until,
+                     links: self.links
         end
+      end
 
+      class Capture < Base
         include RequestDataType
 
-        class << self
-          def find(resource_id)
-            raise ArgumentError.new("id required") if resource_id.to_s.strip.empty?
-            path = "v1/payments/capture/#{resource_id}"
-            self.new(api.get(path))
-          end
+        attr_accessor :id, :create_time, :update_time, :amount, :is_final_capture, :state, :parent_payment, :links
+
+        def self.find(id)
+          path = "v1/payments/capture/#{id}"
+          response = api.get path
+          self.new response
         end
 
         def refund(refund)
           refund = Refund.new(refund) unless refund.is_a? Refund
           path = "v1/payments/capture/#{self.id}/refund"
-          response = api.post(path, refund.to_hash, http_header)
-          Refund.new(response)
+          response = api.post path, refund.to_hash, request_headers
+          Refund.new response
         end
 
+        def final_capture?
+          self.is_final_capture
+        end
+
+        def to_hash
+          strip_hash id: self.id, create_time: self.create_time, update_time: self.update_time, amount: self.amount,
+                     is_final_capture: self.is_final_capture, state: self.state, parent_payment: self.parent_payment,
+                     links: self.links
+        end
       end
+
       class Refund < Base
-
-        def self.load_members
-          object_of :id, String
-          object_of :create_time, DateTime
-          object_of :amount, Amount
-          object_of :state, String
-          object_of :sale_id, String
-          object_of :capture_id, String
-          object_of :parent_payment, String
-          array_of  :links, Links
-        end
-
         include RequestDataType
 
-        class << self
-          def find(resource_id)
-            raise ArgumentError.new("id required") if resource_id.to_s.strip.empty?
-            path = "v1/payments/refund/#{resource_id}"
-            self.new(api.get(path))
-          end
+        attr_accessor :id, :create_time, :amount, :state, :sale_id, :capture_id, :parent_payment, :links
+
+        def self.find(id)
+          path = "v1/payments/refund/#{id}"
+          response = api.get path
+          self.new response
         end
 
+        def to_hash
+          strip_hash id: self.id, create_time: self.create_time, amount: self.amount, state: self.state,
+                     sale_id: self.sale_id, capture_id: self.capture_id, parent_payment: self.parent_payment,
+                     links: self.links
+        end
       end
+
+      class Payer < Base
+        attr_accessor :payment_method, :funding_instruments, :payer_info
+
+        def payer_info
+          @payer_info ||= PayerInfo.new
+        end
+
+        def payer_info=(value)
+          @payer_info = value.is_a?(PayerInfo) ? value : PayerInfo.new(value)
+        end
+
+        def to_hash
+          strip_hash payment_method: self.payment_method, funding_instruments: self.funding_instruments,
+                     payer_info: self.payer_info.to_hash
+        end
+      end
+
+      class FundingInstrument < Base
+        attr_accessor :credit_card, :credit_card_token
+
+        def to_hash
+          strip_hash credit_card: self.credit_card, credit_card_token: self.credit_card_token
+        end
+      end
+
+      class Address < Base
+        attr_accessor :line1, :line2, :city, :country_code, :postal_code, :state, :phone
+
+        def to_hash
+          strip_hash line1: self.line1, line2: self.line2, city: self.city, country_code: self.country_code,
+                     postal_code: self.postal_code, state: self.state, phone: self.phone
+        end
+      end
+
+      class Link < Base
+        attr_accessor :href, :rel, :target_schema, :method, :enctype, :schema
+
+        def to_hash
+          strip_hash href: self.href, rel: self.rel, target_schema: self.target_schema, method: self.method,
+                     enctype: self.enctype, schema: self.schema
+        end
+      end
+
+      class HyperSchema < Base
+        attr_accessor :links, :fragment_resolution, :readonly, :content_encoding, :path_start, :media_type
+
+        def to_hash
+          strip_hash links: self.links, fragment_resolution: self.fragment_resolution, readonly: self.readonly,
+                     content_encoding: self.content_encoding, path_start: self.path_start, media_type: self.media_type
+        end
+      end
+
+      class CreditCardToken < Base
+        attr_accessor :credit_card_id, :payer_id, :last4, :type, :expire_month, :expire_year
+
+        def to_hash
+          strip_hash credit_card_id: self.credit_card_id, payer_id: self.payer_id, last4: self.last4, type: self.type,
+                     expire_month: self.expire_month, expire_year: self.expire_year
+        end
+      end
+
+      class PayerInfo < Base
+        attr_accessor :email, :first_name, :last_name, :payer_id, :phone, :shipping_address
+
+        def to_hash
+          strip_hash email: self.email, first_name: self.first_name, last_name: self.last_name, payer_id: self.payer_id,
+                     phone: self.phone, shipping_address: self.shipping_address
+        end
+      end
+
+      class Transaction < Base
+        attr_accessor :amount, :payee, :description, :item_list, :related_resources, :transactions
+
+        def amount
+          @amount ||= Amount.new
+        end
+
+        def amount=(value)
+          @amount = value.is_a?(Amount) ? value : Amount.new(value)
+        end
+
+        def to_hash
+          strip_hash amount: self.amount.to_hash, payee: self.payee, description: self.description,
+                     item_list: self.item_list, related_resources: self.related_resources,
+                     transactions: self.transactions
+        end
+      end
+
+      class Amount < Base
+        attr_accessor :total, :currency, :details
+
+        def details
+          @detail ||= AmountDetails.new
+        end
+
+        def details=(value)
+          @details = value.is_a?(AmountDetails) ? value : AmountDetails.new(value)
+        end
+
+        def to_hash
+          strip_hash total: self.total, currency: self.currency, details: self.details.to_hash
+        end
+      end
+
+      class AmountDetails < Base
+        attr_accessor :shipping, :subtotal, :tax, :free
+
+        def to_hash
+          strip_hash shipping: self.shipping, subtotal: self.subtotal, tax: self.tax, free: self.free
+        end
+      end
+
+      class Payee < Base
+        attr_accessor :email, :merchant_id, :phone
+
+        def to_hash
+          strip_hash email: self.email, merchant_id: self.merchant_id, phone: self.phone
+        end
+      end
+
+      class Item < Base
+        attr_accessor :quantity, :name, :price, :currency, :sku
+
+        def to_hash
+          strip_hash quantity: self.quantity, name: self.name, price: self.price, currency: self.currency, sku: self.sku
+        end
+      end
+
+      class ShippingAddress < Base
+        attr_accessor :recipient_name
+
+        def to_hash
+          strip_hash recipient_name: self.recipient_name
+        end
+      end
+
+      class ItemList < Base
+        attr_accessor :items, :shipping_address
+
+        def to_hash
+          strip_hash items: self.items, shipping_address: self.shipping_address
+        end
+      end
+
+      class RelatedResources < Base
+        attr_accessor :sale, :authorization, :capture, :refund
+
+        def to_hash
+          strip_hash sale: self.sale, authorization: self.authorization, capture: self.capture, refund: self.refund
+        end
+      end
+
       class RedirectUrls < Base
+        attr_accessor :return_url, :cancel_url
 
-        def self.load_members
-          object_of :return_url, String
-          object_of :cancel_url, String
+        def to_hash
+          strip_hash return_url: self.return_url, cancel_url: self.cancel_url
         end
-
       end
+
       class PaymentHistory < Base
+        attr_accessor :payments, :count, :next_id
 
-        def self.load_members
-          array_of  :payments, Payment
-          object_of :count, Integer
-          object_of :next_id, String
+        def to_hash
+          strip_hash payments: self.payments, count: self.count, next_id: self.next_id
         end
-
       end
+
       class PaymentExecution < Base
+        attr_accessor :payer_id, :transactions
 
-        def self.load_members
-          object_of :payer_id, String
-          array_of  :transactions, Transactions
+        def to_hash
+          strip_hash payer_id: self.payer_id, transactions: self.transactions
         end
-
       end
+
       class Transactions < Base
+        attr_accessor :amount
 
-        def self.load_members
-          object_of :amount, Amount
+        def to_hash
+          strip_hash amount: self.amount
         end
-
       end
+
       class CreditCardHistory < Base
+        attr_accessor :credit_cards, :count, :next_id
 
-        def self.load_members
-          array_of  :"credit-cards", CreditCard
-          object_of :count, Integer
-          object_of :next_id, String
+        def to_hash
+          strip_hash credit_cards: self.credit_cards, count: self.count, next_id: self.next_id
         end
-
       end
 
       constants.each do |data_type_klass|
         data_type_klass = const_get(data_type_klass)
         data_type_klass.load_members if defined? data_type_klass.load_members
       end
-
     end
   end
 end

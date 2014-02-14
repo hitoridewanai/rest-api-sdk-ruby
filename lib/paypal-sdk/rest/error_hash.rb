@@ -4,9 +4,9 @@ module PayPal
       class ErrorHash < Core::Util::OrderedHash
         def self.convert(hash)
           error_hash = new
-          hash.each{|key, value|
+          hash.each do |key, value|
             error_hash[key] = value
-          }
+          end
           error_hash
         end
 
