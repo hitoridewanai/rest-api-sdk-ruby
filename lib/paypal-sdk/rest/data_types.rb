@@ -203,7 +203,7 @@ module PayPal::SDK
         def to_hash
           strip_hash id: self.id, create_time: self.create_time, update_time: self.update_time,
                      amount: self.amount.to_hash, state: self.state, parent_payment: self.parent_payment,
-                     link: self.links.to_hash
+                     link: self.links.collect { |o| o.to_hash }
         end
       end
 
