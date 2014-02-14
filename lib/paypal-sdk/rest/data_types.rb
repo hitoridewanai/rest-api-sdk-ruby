@@ -72,24 +72,40 @@ module PayPal::SDK
           result.empty? ? nil : result[0]
         end
 
+        def token
+          @token ||= parse_token
+        end
+
         def payer
           @payer ||= Payer.new
+        end
+
+        def payer=(value)
+          @payer = value.is_a?(Payer) ? value : Payer.new(value)
         end
 
         def transactions
           @transactions ||= []
         end
 
+        def transactions=(value)
+          @transactions = value.collect { |o| o.is_a?(Transaction) ? o : Transaction.new(o) }
+        end
+
         def redirect_urls
           @redirect_urls ||= RedirectUrls.new
+        end
+
+        def redirect_urls=(value)
+          @redirect_urls = value.is_a?(RedirectUrls) ? value : RedirectUrls.new(value)
         end
 
         def links
           @links ||= []
         end
 
-        def token
-          @token ||= parse_token
+        def links=(value)
+          @links = value.collect { |o| o.is_a?(Link) ? o : Link.new(o) }
         end
 
         def create_time
@@ -98,22 +114,6 @@ module PayPal::SDK
 
         def update_time
           @create_time ||= Time.now.iso8601
-        end
-
-        def payer=(value)
-          @payer = value.is_a?(Payer) ? value : Payer.new(value)
-        end
-
-        def transactions=(value)
-          @transactions = value.collect { |o| o.is_a?(Transaction) ? o : Transaction.new(o) }
-        end
-
-        def redirect_urls=(value)
-          @redirect_urls = value.is_a?(RedirectUrls) ? value : RedirectUrls.new(value)
-        end
-
-        def links=(value)
-          @links = value.collect { |o| o.is_a?(Link) ? o : Link.new(o) }
         end
 
         def to_hash
@@ -184,9 +184,26 @@ module PayPal::SDK
           Refund.new response
         end
 
+        def amount
+          @amount ||= Amount.new
+        end
+
+        def amount=(value)
+          @amount = value.is_a?(Amount) ? value : Amount.new(value)
+        end
+
+        def links
+          @links ||= []
+        end
+
+        def links=(value)
+          @links = value.collect { |o| o.is_a?(Link) ? o : Link.new(o) }
+        end
+
         def to_hash
-          strip_hash id: self.id, create_time: self.create_time, update_time: self.update_time, amount: self.amount,
-                     state: self.state, parent_payment: self.parent_payment, link: self.links
+          strip_hash id: self.id, create_time: self.create_time, update_time: self.update_time,
+                     amount: self.amount.to_hash, state: self.state, parent_payment: self.parent_payment,
+                     link: self.links.to_hash
         end
       end
 
@@ -340,9 +357,17 @@ module PayPal::SDK
       class PayerInfo < Base
         attr_accessor :email, :first_name, :last_name, :payer_id, :phone, :shipping_address
 
+        def shipping_address
+          @shipping_address ||= Address.new
+        end
+
+        def shipping_address=(value)
+          @shipping_address = value.is_a?(Address) ? value : Address.new(value)
+        end
+
         def to_hash
           strip_hash email: self.email, first_name: self.first_name, last_name: self.last_name, payer_id: self.payer_id,
-                     phone: self.phone, shipping_address: self.shipping_address
+                     phone: self.phone, shipping_address: self.shipping_address.to_hash
         end
       end
 
@@ -357,9 +382,17 @@ module PayPal::SDK
           @amount = value.is_a?(Amount) ? value : Amount.new(value)
         end
 
+        def related_resources
+          @related_resources ||= RelatedResource.new
+        end
+
+        def related_resources=(value)
+          @related_resources = value.collect { |o| o.is_a?(RelatedResource) ? o : RelatedResource.new(o) }
+        end
+
         def to_hash
           strip_hash amount: self.amount.to_hash, payee: self.payee, description: self.description,
-                     item_list: self.item_list, related_resources: self.related_resources,
+                     item_list: self.item_list, related_resources: self.related_resources.to_hash,
                      transactions: self.transactions
         end
       end
@@ -420,11 +453,20 @@ module PayPal::SDK
         end
       end
 
-      class RelatedResources < Base
+      class RelatedResource < Base
         attr_accessor :sale, :authorization, :capture, :refund
 
+        def sale
+          @sale ||= Sale.new
+        end
+
+        def sale=(value)
+          @sale = value.is_a?(Sale) ? value : Sale.new(value)
+        end
+
         def to_hash
-          strip_hash sale: self.sale, authorization: self.authorization, capture: self.capture, refund: self.refund
+          strip_hash sale: self.sale.to_hash, authorization: self.authorization, capture: self.capture,
+                     refund: self.refund
         end
       end
 
